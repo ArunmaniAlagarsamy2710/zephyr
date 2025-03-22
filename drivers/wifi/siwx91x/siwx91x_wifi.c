@@ -743,6 +743,38 @@ static int siwx91x_dev_init(const struct device *dev)
 	return 0;
 }
 
+static int siwx91x_channel(const struct device *dev, struct wifi_channel_info *z_channel)
+{
+	struct siwx91x_dev *sidev = dev->data;
+	sl_wifi_channel_t sl_channel;
+	sl_wifi_interface_t interface;
+	sl_status_t status;
+
+	__ASSERT(channel, "channel cannot be NULL");
+
+	/*TODO check this state completely */
+	if (sidev->state != WIFI_STATE_COMPLETED) {
+		return -EINVAL;
+	}
+
+	/*FIXME confirm the set channel whether it supports the AP or STA also? */
+	interface = sl_wifi_get_default_interface();
+	if (z_channel->oper == WIFI_MGMT_SET) {
+		sl_channel.channel = z_channel->channel;
+		/* TODO reboot needed to change the channel for AP */
+		status = sl_wifi_set_channel(interface, sl_channel);
+	} else {
+		status = sl_wifi_get_channel(interface, &sl_channel);
+		z_channel->channel = sl_channel.channel;
+	}
+
+	if (status != SL_STATUS_OK) {
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static const struct wifi_mgmt_ops siwx91x_mgmt = {
 	.scan			= siwx91x_scan,
 	.connect		= siwx91x_connect,
@@ -750,6 +782,7 @@ static const struct wifi_mgmt_ops siwx91x_mgmt = {
 	.ap_enable		= siwx91x_ap_enable,
 	.ap_disable		= siwx91x_ap_disable,
 	.ap_sta_disconnect	= siwx91x_ap_sta_disconnect,
+	.channel		= siwx91x_channel,
 	.iface_status		= siwx91x_status,
 	.mode			= siwx91x_mode,
 #if defined(CONFIG_NET_STATISTICS_WIFI)
