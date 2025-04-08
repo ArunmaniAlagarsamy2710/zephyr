@@ -755,6 +755,59 @@ static int siwx91x_get_version(const struct device *dev, struct wifi_version *pa
 	return 0;
 }
 
+static int siwx91x_get_connected_ap_beacon_interval_ms(void)
+{
+	sl_wifi_operational_statistics_t sl_stat = { };
+	int beacon_interval;
+	sl_status_t status;
+
+	status = sl_wifi_get_operational_statistics(SL_WIFI_CLIENT_INTERFACE, &sl_stat);
+	if (status != SL_STATUS_OK) {
+		return status;
+	}
+
+	beacon_interval = sys_get_le16(sl_stat.beacon_interval);
+	beacon_interval = beacon_interval * 1024 / 1000;
+	return beacon_interval;
+}
+
+static int siwx91x_convert_li_bcn_unit_to_ms(uint16_t bcn_listen_interval)
+{
+	uint16_t beacon_interval;
+	int listen_interval_ms;
+
+	beacon_interval = siwx91x_get_connected_ap_beacon_interval_ms();
+	if (beacon_interval < 0) {
+		LOG_ERR("Failed to get beacon interval: 0x%x", beacon_interval);
+		return -EAGAIN;
+	}
+
+	listen_interval_ms = bcn_listen_interval * beacon_interval;
+	return listen_interval_ms;
+}
+
+static int siwx91x_set_listen_interval(sl_wifi_performance_profile_t *sl_ps_profile,
+				       uint16_t bcn_listen_interval)
+{
+	sl_ps_profile->listen_interval = siwx91x_convert_li_bcn_unit_to_ms(bcn_listen_interval);
+	if (sl_ps_profile->listen_interval < 0) {
+		return sl_ps_profile->listen_interval;
+	}
+
+	if (sl_ps_profile->listen_interval > SIWX91X_PS_MAX_LISTEN_INTERVAL_MS) {
+		LOG_WRN("Listen interval exceeded, capping to %d",
+			SIWX91X_PS_MAX_LISTEN_INTERVAL_MS);
+		sl_ps_profile->listen_interval = SIWX91X_PS_MAX_LISTEN_INTERVAL_MS;
+	}
+
+	if (sl_ps_profile->listen_interval == 0) {
+		sl_ps_profile->dtim_aligned_type = 1;
+		LOG_WRN("Listen interval is zero, enabling DTIM-based wakeup");
+	}
+
+	return 0;
+}
+
 static int siwx91x_configure_ps_mode(const struct device *dev,
 				     sl_wifi_performance_profile_t *sl_ps_profile,
 				     enum wifi_ps state)
@@ -818,6 +871,19 @@ static int siwx91x_set_power_save(const struct device *dev, struct wifi_ps_param
 			return 0;
 		}
 
+		if (!sl_ps_profile->dtim_aligned_type && params->enabled) {
+			if (sidev->state != WIFI_STATE_COMPLETED) {
+				LOG_ERR("Listen interval works after connection");
+				return -EINVAL;
+			}
+
+			status = siwx91x_set_listen_interval(sl_ps_profile,
+							     sidev->bcn_listen_interval);
+			if (status < 0) {
+				return status;
+			}
+		}
+
 		break;
 	case WIFI_PS_PARAM_MODE:
 		if (params->mode != WIFI_PS_MODE_LEGACY) {
@@ -827,12 +893,29 @@ static int siwx91x_set_power_save(const struct device *dev, struct wifi_ps_param
 		}
 
 		break;
+	case WIFI_PS_PARAM_LISTEN_INTERVAL:
+		sidev->bcn_listen_interval = params->listen_interval;
+		return 0;
 	case WIFI_PS_PARAM_WAKEUP_MODE:
 		if (params->wakeup_mode == WIFI_PS_WAKEUP_MODE_DTIM) {
 			sl_ps_profile->dtim_aligned_type = 1;
 			sl_ps_profile->listen_interval = 0;
+			sidev->bcn_listen_interval = 0;
 		} else if (params->wakeup_mode == WIFI_PS_WAKEUP_MODE_LISTEN_INTERVAL) {
 			sl_ps_profile->dtim_aligned_type = 0;
+
+			if (sl_ps_profile->profile != HIGH_PERFORMANCE) {
+				if (sidev->state != WIFI_STATE_COMPLETED) {
+					LOG_ERR("Listen interval works after connection");
+					return -EINVAL;
+				}
+
+				status = siwx91x_set_listen_interval(sl_ps_profile,
+								     sidev->bcn_listen_interval);
+				if (status < 0) {
+					return status;
+				}
+			}
 		}
 
 		break;
@@ -871,7 +954,9 @@ static int siwx91x_set_power_save(const struct device *dev, struct wifi_ps_param
 		sl_ps_profile->profile = sidev->exit_strategy_mode;
 		break;
 	default:
-		return -ENOTSUP;
+		params->fail_reason = WIFI_PS_PARAM_FAIL_CMD_EXEC_FAIL;
+		LOG_ERR("Invalid command");
+		return -EINVAL;
 	}
 
 	status = sl_wifi_set_performance_profile(sl_ps_profile);
@@ -889,6 +974,7 @@ static int siwx91x_get_power_save_config(const struct device *dev, struct wifi_p
 	sl_wifi_performance_profile_t sl_ps_profile;
 	struct siwx91x_dev *sidev = dev->data;
 	sl_wifi_interface_t interface;
+	uint16_t beacon_interval;
 	sl_status_t status;
 
 	__ASSERT(config, "config cannot be NULL");
@@ -930,6 +1016,12 @@ static int siwx91x_get_power_save_config(const struct device *dev, struct wifi_p
 		config->ps_params.wakeup_mode = WIFI_PS_WAKEUP_MODE_DTIM;
 	} else {
 		config->ps_params.wakeup_mode = WIFI_PS_WAKEUP_MODE_LISTEN_INTERVAL;
+
+		beacon_interval = siwx91x_get_connected_ap_beacon_interval_ms();
+		if (beacon_interval > 0) {
+			config->ps_params.listen_interval =
+				sl_ps_profile.listen_interval / beacon_interval;
+		}
 	}
 
 	/* Device supports only legacy power-save mode */
@@ -946,6 +1038,7 @@ static void siwx91x_iface_init(struct net_if *iface)
 
 	sidev->state = WIFI_STATE_INTERFACE_DISABLED;
 	sidev->exit_strategy_mode = HIGH_PERFORMANCE;
+	sidev->bcn_listen_interval = 0;
 	sidev->iface = iface;
 
 	sl_wifi_set_callback(SL_WIFI_SCAN_RESULT_EVENTS,
