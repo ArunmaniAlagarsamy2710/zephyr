@@ -66,6 +66,7 @@ int siwx91x_get_nwp_config(sl_wifi_device_configuration_t *get_config, uint8_t w
 
 	if (wifi_oper_mode == WIFI_STA_MODE) {
 		boot_config->oper_mode = SL_SI91X_CLIENT_MODE;
+		boot_config->ext_custom_feature_bit_map = SL_SI91X_EXT_FEAT_LOW_POWER_MODE;
 
 		if (IS_ENABLED(CONFIG_WIFI_SILABS_SIWX91X_ROAMING_USE_DEAUTH)) {
 			boot_config->custom_feature_bit_map |=
@@ -88,7 +89,10 @@ int siwx91x_get_nwp_config(sl_wifi_device_configuration_t *get_config, uint8_t w
 
 #ifdef CONFIG_WIFI_SILABS_SIWX91X
 		boot_config->ext_tcp_ip_feature_bit_map = SL_SI91X_CONFIG_FEAT_EXTENSION_VALID;
-		boot_config->config_feature_bit_map = SL_SI91X_ENABLE_ENHANCED_MAX_PSP;
+		if (IS_ENABLED(CONFIG_WIFI_SIWX91X_ENHANCED_MAX_PSP)) {
+			boot_config->config_feature_bit_map = SL_SI91X_ENABLE_ENHANCED_MAX_PSP;
+		}
+
 		boot_config->ext_custom_feature_bit_map |=
 			SL_SI91X_EXT_FEAT_IEEE_80211W |
 			SL_SI91X_EXT_FEAT_FRONT_END_SWITCH_PINS_ULP_GPIO_4_5_0;
