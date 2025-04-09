@@ -140,6 +140,7 @@ static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_p
 	/* Wiseconnect requires a valid PSK even if WIFI_SECURITY_TYPE_NONE is selected */
 	static const char dummy_psk[] = "dummy_value";
 	sl_wifi_ap_configuration_t saved_ap_cfg = { };
+	enum wifi_ap_status event_status;
 	sl_wifi_interface_t interface;
 	sl_status_t ret;
 	int sec;
@@ -162,7 +163,9 @@ static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_p
 	interface = sl_wifi_get_default_interface();
 	if (FIELD_GET(SIWX91X_INTERFACE_MASK, interface) != SL_WIFI_AP_INTERFACE) {
 		LOG_ERR("Interface not in AP mode");
-		return -EINVAL;
+		event_status = WIFI_STATUS_AP_OP_NOT_PERMITTED;
+		ret = -EINVAL;
+		goto raise_events;
 	}
 
 	get_saved_ap_configuration(&saved_ap_cfg);
@@ -173,7 +176,9 @@ static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_p
 
 	if (params->band != WIFI_FREQ_BAND_UNKNOWN && params->band != WIFI_FREQ_BAND_2_4_GHZ) {
 		LOG_ERR("Unsupported band");
-		return -ENOTSUP;
+		event_status = WIFI_STATUS_AP_OP_NOT_SUPPORTED;
+		ret = -ENOTSUP;
+		goto raise_events;
 	}
 
 	siwx91x_configure_feature_bitmap(dev, HIDDEN_SSID, params->ignore_broadcast_ssid);
@@ -186,14 +191,18 @@ static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_p
 
 	if (params->bandwidth != WIFI_FREQ_BANDWIDTH_20MHZ) {
 		LOG_ERR("Unsupported bandwidth");
-		return -ENOTSUP;
+		event_status = WIFI_STATUS_AP_OP_NOT_SUPPORTED;
+		ret = -ENOTSUP;
+		goto raise_events;
 	}
 
 	siwx91x_ap_cfg.channel.bandwidth = SL_WIFI_BANDWIDTH_20MHz;
 
 	if (params->ssid_length == 0 || params->ssid_length > WIFI_SSID_MAX_LEN) {
 		LOG_ERR("Invalid ssid length");
-		return -EINVAL;
+		event_status = WIFI_STATUS_AP_SSID_NOT_ALLOWED;
+		ret = -EINVAL;
+		goto raise_events;
 	}
 
 	siwx91x_ap_cfg.ssid.length = params->ssid_length;
@@ -202,14 +211,17 @@ static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_p
 	sec = siwx91x_map_ap_security(params->security);
 	if (sec < 0) {
 		LOG_ERR("Invalid security type");
-		return -EINVAL;
+		event_status = WIFI_STATUS_AP_AUTH_TYPE_NOT_SUPPORTED;
+		ret = -EINVAL;
+		goto raise_events;
 	}
 
 	siwx91x_ap_cfg.security = sec;
 
 	ret = evaluate_nwp_reboot(dev, WIFI_AP_MODE);
 	if (ret < 0) {
-		return ret;
+		event_status = WIFI_STATUS_AP_FAIL;
+		goto raise_events;
 	}
 
 	if (params->security == WIFI_SECURITY_TYPE_NONE) {
@@ -222,17 +234,25 @@ static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_p
 
 	if (ret != SL_STATUS_OK) {
 		LOG_ERR("Failed to set credentials: 0x%x", ret);
-		return -EINVAL;
+		event_status = WIFI_STATUS_AP_FAIL;
+		ret = -EINVAL;
+		goto raise_events;
 	}
 
 	ret = sl_wifi_start_ap(SL_WIFI_AP_INTERFACE | SL_WIFI_2_4GHZ_INTERFACE, &siwx91x_ap_cfg);
 	if (ret != SL_STATUS_OK) {
 		LOG_ERR("Failed to enable AP mode: 0x%x", ret);
-		return -EIO;
+		event_status = WIFI_STATUS_AP_FAIL;
+		ret = -EIO;
+		goto raise_events;
 	}
 
 	sidev->state = WIFI_STATE_COMPLETED;
 	return 0;
+
+raise_events:
+	wifi_mgmt_raise_ap_enable_result_event(sidev->iface, event_status);
+	return ret;
 }
 
 static int siwx91x_ap_disable(const struct device *dev)
@@ -243,6 +263,7 @@ static int siwx91x_ap_disable(const struct device *dev)
 
 	ret = sl_wifi_stop_ap(interface);
 	if (ret) {
+		wifi_mgmt_raise_ap_disable_result_event(sidev->iface, WIFI_STATUS_AP_FAIL);
 		LOG_ERR("Failed to disable Wi-Fi AP mode: 0x%x", ret);
 		return -EIO;
 	}
@@ -316,6 +337,7 @@ static sl_status_t siwx91x_on_ap_sta_disconnect(sl_wifi_event_t event, void *dat
 
 static int siwx91x_connect(const struct device *dev, struct wifi_connect_req_params *params)
 {
+	struct siwx91x_dev *sidev = dev->data;
 	sl_wifi_client_configuration_t wifi_config = {
 		.bss_type = SL_WIFI_BSS_TYPE_INFRASTRUCTURE,
 		.encryption = SL_WIFI_DEFAULT_ENCRYPTION,
@@ -360,6 +382,7 @@ static int siwx91x_connect(const struct device *dev, struct wifi_connect_req_par
 	}
 
 	if (params->band != WIFI_FREQ_BAND_UNKNOWN && params->band != WIFI_FREQ_BAND_2_4_GHZ) {
+		wifi_mgmt_raise_connect_result_event(sidev->iface, WIFI_STATUS_CONN_FAIL);
 		return -ENOTSUP;
 	}
 
@@ -383,6 +406,7 @@ static int siwx91x_connect(const struct device *dev, struct wifi_connect_req_par
 	interface = sl_wifi_get_default_interface();
 	ret = sl_wifi_connect(interface, &wifi_config, 0);
 	if (ret != SL_STATUS_IN_PROGRESS) {
+		wifi_mgmt_raise_connect_result_event(sidev->iface, WIFI_STATUS_CONN_FAIL);
 		return -EIO;
 	}
 
@@ -401,7 +425,7 @@ static int siwx91x_disconnect(const struct device *dev)
 
 	ret = sl_wifi_disconnect(interface);
 	if (ret != SL_STATUS_OK) {
-		LOG_ERR("Failed to disconnect: 0x%x", ret);
+		wifi_mgmt_raise_disconnect_result_event(sidev->iface, ret);
 		return -EIO;
 	}
 
@@ -670,7 +694,8 @@ static int siwx91x_status(const struct device *dev, struct wifi_iface_status *st
 		status->security = WIFI_SECURITY_TYPE_UNKNOWN;
 	}
 
-	return ret;
+	wifi_mgmt_raise_iface_status_event(sidev->iface, status);
+	return 0;
 }
 
 static int siwx91x_mode(const struct device *dev, struct wifi_mode_info *mode)
