@@ -73,31 +73,6 @@ static int siwx91x_map_ap_security(enum wifi_security_type security)
 	}
 }
 
-static unsigned int siwx91x_on_join(sl_wifi_event_t event,
-				    char *result, uint32_t result_size, void *arg)
-{
-	struct siwx91x_dev *sidev = arg;
-
-	if (*result != 'C') {
-		/* TODO: report the real reason of failure */
-		wifi_mgmt_raise_connect_result_event(sidev->iface, WIFI_STATUS_CONN_FAIL);
-		sidev->state = WIFI_STATE_INACTIVE;
-		return 0;
-	}
-
-	wifi_mgmt_raise_connect_result_event(sidev->iface, WIFI_STATUS_CONN_SUCCESS);
-	sidev->state = WIFI_STATE_COMPLETED;
-
-	if (IS_ENABLED(CONFIG_WIFI_SILABS_SIWX91X_NET_STACK_NATIVE)) {
-		net_if_dormant_off(sidev->iface);
-	}
-
-	siwx91x_on_join_ipv4(sidev);
-	siwx91x_on_join_ipv6(sidev);
-
-	return 0;
-}
-
 static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_params *params)
 {
 	struct siwx91x_dev *sidev = dev->data;
@@ -965,6 +940,31 @@ static int siwx91x_set_power_save(const struct device *dev, struct wifi_ps_param
 		LOG_ERR("Failed to set power save profile: 0x%x", status);
 		return -EIO;
 	}
+
+	return 0;
+}
+
+static unsigned int siwx91x_on_join(sl_wifi_event_t event,
+				    char *result, uint32_t result_size, void *arg)
+{
+	struct siwx91x_dev *sidev = arg;
+
+	if (*result != 'C') {
+		/* TODO: report the real reason of failure */
+		wifi_mgmt_raise_connect_result_event(sidev->iface, WIFI_STATUS_CONN_FAIL);
+		sidev->state = WIFI_STATE_INACTIVE;
+		return 0;
+	}
+
+	wifi_mgmt_raise_connect_result_event(sidev->iface, WIFI_STATUS_CONN_SUCCESS);
+	sidev->state = WIFI_STATE_COMPLETED;
+
+	if (IS_ENABLED(CONFIG_WIFI_SILABS_SIWX91X_NET_STACK_NATIVE)) {
+		net_if_dormant_off(sidev->iface);
+	}
+
+	siwx91x_on_join_ipv4(sidev);
+	siwx91x_on_join_ipv6(sidev);
 
 	return 0;
 }
