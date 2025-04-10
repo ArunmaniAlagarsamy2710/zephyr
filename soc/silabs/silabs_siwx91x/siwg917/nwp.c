@@ -20,10 +20,18 @@
 #include "rsi_ble_common_config.h"
 #endif
 
+#define AP_MAX_NUM_STA 4
+
 LOG_MODULE_REGISTER(siwx91x_nwp);
 
-int siwx91x_get_nwp_config(sl_wifi_device_configuration_t *get_config, uint8_t wifi_oper_mode)
+int siwx91x_get_nwp_config(sl_wifi_device_configuration_t *get_config, uint8_t wifi_oper_mode,
+			   bool hidden_ssid, uint8_t max_num_sta)
 {
+	if (wifi_oper_mode == WIFI_AP_MODE && max_num_sta > AP_MAX_NUM_STA) {
+		LOG_ERR("Exceeded maximum supported stations (%d)", AP_MAX_NUM_STA);
+		return -EINVAL;
+	}
+
 	sl_wifi_device_configuration_t default_config = {
 		.band = SL_SI91X_WIFI_BAND_2_4GHZ,
 		.region_code = DEFAULT_REGION,
@@ -95,6 +103,14 @@ int siwx91x_get_nwp_config(sl_wifi_device_configuration_t *get_config, uint8_t w
 		boot_config->oper_mode = SL_SI91X_ACCESS_POINT_MODE;
 		boot_config->coex_mode = SL_SI91X_WLAN_ONLY_MODE;
 
+		if (hidden_ssid) {
+			boot_config->custom_feature_bit_map |=
+				SL_SI91X_CUSTOM_FEAT_AP_IN_HIDDEN_MODE;
+		}
+
+		boot_config->custom_feature_bit_map |=
+			SL_SI91X_CUSTOM_FEAT_MAX_NUM_OF_CLIENTS(max_num_sta);
+
 		if (IS_ENABLED(CONFIG_BT_SILABS_SIWX91X)) {
 			LOG_WRN("Bluetooth is not supported in AP mode");
 		}
@@ -136,12 +152,12 @@ int siwx91x_get_nwp_config(sl_wifi_device_configuration_t *get_config, uint8_t w
 	return 0;
 }
 
-int siwx91x_nwp_mode_switch(uint8_t oper_mode)
+int siwx91x_nwp_mode_switch(uint8_t oper_mode, bool hidden_ssid, uint8_t max_num_sta)
 {
 	sl_wifi_device_configuration_t nwp_config;
 	int status;
 
-	status = siwx91x_get_nwp_config(&nwp_config, oper_mode);
+	status = siwx91x_get_nwp_config(&nwp_config, oper_mode, hidden_ssid, max_num_sta);
 	if (status < 0) {
 		return status;
 	}
@@ -165,7 +181,7 @@ static int siwg917_nwp_init(void)
 	sl_wifi_device_configuration_t network_config;
 	sl_status_t status;
 
-	siwx91x_get_nwp_config(&network_config, WIFI_STA_MODE);
+	siwx91x_get_nwp_config(&network_config, WIFI_STA_MODE, false, 0);
 	/* TODO: If sl_net_*_profile() functions will be needed for WiFi then call
 	 * sl_net_set_profile() here. Currently these are unused.
 	 */
