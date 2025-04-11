@@ -403,6 +403,96 @@ static int siwx91x_ap_disable(const struct device *dev)
 	return ret;
 }
 
+static bool siwx91x_param_comparison(struct wifi_iface_status *prev_params,
+				     struct wifi_connect_req_params *new_params)
+{
+	__ASSERT(prev_params, "prev params cannot be NULL");
+	__ASSERT(new_params, "new params cannot be NULL");
+
+	if (new_params->ssid_length != prev_params->ssid_len ||
+	    memcmp(new_params->ssid, prev_params->ssid, prev_params->ssid_len) != 0 ||
+	    new_params->security != prev_params->security) {
+		return true;
+	} else if (new_params->channel != WIFI_CHANNEL_ANY &&
+		   new_params->channel != prev_params->channel) {
+		return true;
+	}
+
+	return false;
+}
+
+static int siwx91x_check_prev_ap_param(const struct device *dev,
+				       struct wifi_connect_req_params *new_params)
+{
+	struct wifi_iface_status prev_params = { };
+	uint32_t prev_psk_length = WIFI_PSK_MAX_LEN;
+	uint8_t prev_psk[WIFI_PSK_MAX_LEN];
+	sl_net_credential_type_t psk_type;
+	int ret;
+
+	ret = siwx91x_status(dev, &prev_params);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (siwx91x_param_comparison(&prev_params, new_params)) {
+		return siwx91x_ap_disable(dev);
+	}
+
+	if (new_params->security != WIFI_SECURITY_TYPE_NONE) {
+		ret = sl_net_get_credential(SL_NET_DEFAULT_WIFI_AP_CREDENTIAL_ID, &psk_type,
+					    prev_psk, &prev_psk_length);
+		if (ret < 0) {
+			LOG_ERR("Failed to get credentials: 0x%x", ret);
+			return -EIO;
+		}
+
+		if (new_params->psk_length != prev_psk_length ||
+		    memcmp(new_params->psk, prev_psk, prev_psk_length) != 0) {
+			return siwx91x_ap_disable(dev);
+		}
+	}
+
+	LOG_ERR("Device already in active state");
+	return -EALREADY;
+}
+
+static int siwx91x_check_prev_sta_param(const struct device *dev,
+					struct wifi_connect_req_params *new_params)
+{
+	struct wifi_iface_status prev_params = { };
+	uint32_t prev_psk_length = WIFI_PSK_MAX_LEN;
+	uint8_t prev_psk[WIFI_PSK_MAX_LEN];
+	sl_net_credential_type_t psk_type;
+	int ret;
+
+	ret = siwx91x_status(dev, &prev_params);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (siwx91x_param_comparison(&prev_params, new_params)) {
+		return siwx91x_disconnect(dev);
+	}
+
+	if (new_params->security != WIFI_SECURITY_TYPE_NONE) {
+		ret = sl_net_get_credential(SL_NET_DEFAULT_WIFI_CLIENT_CREDENTIAL_ID, &psk_type,
+					    prev_psk, &prev_psk_length);
+		if (ret < 0) {
+			LOG_ERR("Failed to get credentials: 0x%x", ret);
+			return -EIO;
+		}
+
+		if (new_params->psk_length != prev_psk_length ||
+		    memcmp(new_params->psk, prev_psk, prev_psk_length) != 0) {
+			return siwx91x_disconnect(dev);
+		}
+	}
+
+	LOG_ERR("Device already in active state");
+	return -EALREADY;
+}
+
 static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_params *params)
 {
 	sl_wifi_interface_t interface = sl_wifi_get_default_interface();
@@ -433,6 +523,26 @@ static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_p
 		LOG_ERR("Interface not in AP mode");
 		wifi_mgmt_raise_ap_enable_result_event(sidev->iface,
 						       WIFI_STATUS_AP_OP_NOT_PERMITTED);
+	}
+
+	if (sidev->state == WIFI_STATE_COMPLETED) {
+		ret = siwx91x_check_prev_ap_param(dev, params);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
+	if (params->band != WIFI_FREQ_BAND_UNKNOWN && params->band != WIFI_FREQ_BAND_2_4_GHZ) {
+		return -ENOTSUP;
+	}
+
+	if (params->channel == WIFI_CHANNEL_ANY) {
+		siwx91x_ap_cfg.channel.channel = SL_WIFI_AUTO_CHANNEL;
+	} else {
+		siwx91x_ap_cfg.channel.channel = params->channel;
+	}
+
+	if (siwx91x_bandwidth(params->bandwidth) < 0) {
 		return -EINVAL;
 	}
 
@@ -592,6 +702,13 @@ static int siwx91x_connect(const struct device *dev, struct wifi_connect_req_par
 	struct siwx91x_dev *sidev = dev->data;
 	enum wifi_mfp_options mfp_conf;
 	int ret = 0;
+
+	if (sidev->state == WIFI_STATE_COMPLETED) {
+		ret = siwx91x_check_prev_sta_param(dev, params);
+		if (ret < 0) {
+			return ret;
+		}
+	}
 
 	switch (params->security) {
 	case WIFI_SECURITY_TYPE_NONE:
