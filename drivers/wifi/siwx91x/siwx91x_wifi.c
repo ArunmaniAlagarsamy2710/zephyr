@@ -27,6 +27,19 @@ LOG_MODULE_REGISTER(siwx91x_wifi);
 
 NET_BUF_POOL_FIXED_DEFINE(siwx91x_tx_pool, 1, _NET_ETH_MAX_FRAME_SIZE, 0, NULL);
 
+int siwx91x_notify_connect_event(struct net_if *iface, enum wifi_conn_status event_status, int ret)
+{
+	wifi_mgmt_raise_connect_result_event(iface, event_status);
+	return ret;
+}
+
+int siwx91x_notify_ap_event(struct net_if *iface, enum wifi_ap_status event_status, int ret)
+{
+	wifi_mgmt_raise_ap_enable_result_event(iface, event_status);
+	return ret;
+}
+
+
 static int evaluate_nwp_reboot(const struct device *dev, uint8_t oper_mode)
 {
 	struct siwx91x_dev *sidev = dev->data;
@@ -155,12 +168,12 @@ static unsigned int siwx91x_on_join(sl_wifi_event_t event,
 
 	if (*result != 'C') {
 		/* TODO: report the real reason of failure */
-		wifi_mgmt_raise_connect_result_event(sidev->iface, WIFI_STATUS_CONN_FAIL);
+		siwx91x_notify_connect_event(sidev->iface, WIFI_STATUS_CONN_FAIL, -1);
 		sidev->state = WIFI_STATE_INACTIVE;
 		return 0;
 	}
 
-	wifi_mgmt_raise_connect_result_event(sidev->iface, WIFI_STATUS_CONN_SUCCESS);
+	siwx91x_notify_connect_event(sidev->iface, WIFI_STATUS_CONN_SUCCESS, 0);
 	sidev->state = WIFI_STATE_COMPLETED;
 
 	if (IS_ENABLED(CONFIG_WIFI_SILABS_SIWX91X_NET_STACK_NATIVE)) {
@@ -201,7 +214,8 @@ static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_p
 
 	if (FIELD_GET(SIWX91X_INTERFACE_MASK, interface) != SL_WIFI_AP_INTERFACE) {
 		LOG_ERR("Interface not in AP mode");
-		return -EINVAL;
+		return siwx91x_notify_ap_event(sidev->iface, WIFI_STATUS_AP_OP_NOT_PERMITTED,
+					       -EINVAL);
 	}
 
 	get_saved_ap_configuration(&saved_ap_cfg);
@@ -212,17 +226,20 @@ static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_p
 
 	if (params->band != WIFI_FREQ_BAND_UNKNOWN && params->band != WIFI_FREQ_BAND_2_4_GHZ) {
 		LOG_ERR("Unsupported band");
-		return -ENOTSUP;
+		return siwx91x_notify_ap_event(sidev->iface, WIFI_STATUS_AP_OP_NOT_SUPPORTED,
+					       -ENOTSUP);
 	}
 
 	if (params->bandwidth != WIFI_FREQ_BANDWIDTH_20MHZ) {
 		LOG_ERR("Unsupported bandwidth");
-		return -ENOTSUP;
+		return siwx91x_notify_ap_event(sidev->iface, WIFI_STATUS_AP_OP_NOT_SUPPORTED,
+					       -ENOTSUP);
 	}
 
 	if (params->ssid_length == 0 || params->ssid_length > WIFI_SSID_MAX_LEN) {
 		LOG_ERR("Invalid ssid length");
-		return -EINVAL;
+                return siwx91x_notify_ap_event(sidev->iface, WIFI_STATUS_AP_SSID_NOT_ALLOWED,
+					       -EINVAL);
 	}
 
 	siwx91x_ap_cfg.ssid.length = params->ssid_length;
@@ -231,7 +248,9 @@ static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_p
 	sec = siwx91x_map_ap_security(params->security);
 	if (sec < 0) {
 		LOG_ERR("Invalid security type");
-		return -EINVAL;
+                return siwx91x_notify_ap_event(sidev->iface,
+					       WIFI_STATUS_AP_AUTH_TYPE_NOT_SUPPORTED,
+					       -EINVAL);
 	}
 
 	siwx91x_ap_cfg.security = sec;
@@ -246,14 +265,15 @@ static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_p
 
 	if (ret != SL_STATUS_OK) {
 		LOG_ERR("Failed to set credentials: 0x%x", ret);
-		return -EINVAL;
+                return siwx91x_notify_ap_event(sidev->iface, WIFI_STATUS_AP_FAIL,
+					       -EINVAL);
 	}
 
 	/* Device hiddes both length and ssid at same time */
 	siwx91x_set_hidden_ssid(dev, params->ignore_broadcast_ssid);
 	ret = evaluate_nwp_reboot(dev, WIFI_AP_MODE);
 	if (ret < 0) {
-		return ret;
+                return siwx91x_notify_ap_event(sidev->iface, WIFI_STATUS_AP_FAIL, ret);
 	}
 
 	if (params->mfp != WIFI_MFP_DISABLE) {
@@ -270,7 +290,8 @@ static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_p
 	ret = sl_wifi_start_ap(SL_WIFI_AP_INTERFACE | SL_WIFI_2_4GHZ_INTERFACE, &siwx91x_ap_cfg);
 	if (ret != SL_STATUS_OK) {
 		LOG_ERR("Failed to enable AP mode: 0x%x", ret);
-		return -EIO;
+                return siwx91x_notify_ap_event(sidev->iface, WIFI_STATUS_AP_FAIL,
+					       -EIO);
 	}
 
 	sidev->state = WIFI_STATE_COMPLETED;
@@ -286,6 +307,7 @@ static int siwx91x_ap_disable(const struct device *dev)
 	ret = sl_wifi_stop_ap(interface);
 	if (ret) {
 		LOG_ERR("Failed to disable Wi-Fi AP mode: 0x%x", ret);
+		wifi_mgmt_raise_ap_disable_result_event(sidev->iface, WIFI_STATUS_AP_FAIL);
 		return -EIO;
 	}
 
@@ -363,6 +385,7 @@ static int siwx91x_connect(const struct device *dev, struct wifi_connect_req_par
 		.encryption = SL_WIFI_DEFAULT_ENCRYPTION,
 		.credential_id = SL_NET_DEFAULT_WIFI_CLIENT_CREDENTIAL_ID,
 	};
+	struct siwx91x_dev *sidev = dev->data;
 	enum wifi_mfp_options mfp_conf;
 	int ret = 0;
 
@@ -402,7 +425,7 @@ static int siwx91x_connect(const struct device *dev, struct wifi_connect_req_par
 	}
 
 	if (params->band != WIFI_FREQ_BAND_UNKNOWN && params->band != WIFI_FREQ_BAND_2_4_GHZ) {
-		return -ENOTSUP;
+		return siwx91x_notify_connect_event(sidev->iface, WIFI_STATUS_CONN_FAIL, -ENOTSUP);
 	}
 
 	if (params->psk_length) {
@@ -416,7 +439,7 @@ static int siwx91x_connect(const struct device *dev, struct wifi_connect_req_par
 
 	if (ret != SL_STATUS_OK) {
 		LOG_ERR("Failed to set credentials: 0x%x", ret);
-		return -EINVAL;
+		return siwx91x_notify_connect_event(sidev->iface, WIFI_STATUS_CONN_FAIL, -EINVAL);
 	}
 
 	if (params->security == WIFI_SECURITY_TYPE_PSK_SHA256) {
@@ -439,7 +462,7 @@ static int siwx91x_connect(const struct device *dev, struct wifi_connect_req_par
 
 	ret = sl_wifi_connect(interface, &wifi_config, 0);
 	if (ret != SL_STATUS_IN_PROGRESS) {
-		return -EIO;
+		return siwx91x_notify_connect_event(sidev->iface, WIFI_STATUS_CONN_FAIL, -EIO);
 	}
 
 	return 0;
@@ -459,6 +482,7 @@ static int siwx91x_disconnect(const struct device *dev)
 	ret = sl_wifi_disconnect(interface);
 	if (ret != SL_STATUS_OK) {
 		LOG_ERR("Failed to disconnect: 0x%x", ret);
+		wifi_mgmt_raise_disconnect_result_event(sidev->iface, ret);
 		return -EIO;
 	}
 
@@ -739,7 +763,8 @@ static int siwx91x_status(const struct device *dev, struct wifi_iface_status *st
 		status->security = WIFI_SECURITY_TYPE_UNKNOWN;
 	}
 
-	return ret;
+	wifi_mgmt_raise_iface_status_event(sidev->iface, status);
+	return 0;
 }
 
 static int siwx91x_mode(const struct device *dev, struct wifi_mode_info *mode)
