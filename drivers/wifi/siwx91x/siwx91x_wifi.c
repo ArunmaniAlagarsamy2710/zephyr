@@ -430,7 +430,106 @@ static int siwx91x_ap_disable(const struct device *dev)
 	return ret;
 }
 
->>>>>>> ffa0d3a226b (drivers: wifi: siwx91x: Relocate driver functions)
+static bool siwx91x_is_param_changed(struct wifi_iface_status *prev_params,
+                                     struct wifi_connect_req_params *new_params)
+{
+	__ASSERT(prev_params, "prev params cannot be NULL");
+	__ASSERT(new_params, "new params cannot be NULL");
+
+	if (new_params->ssid_length != prev_params->ssid_len) {
+		return true;
+	}
+
+	if (memcmp(new_params->ssid, prev_params->ssid, prev_params->ssid_len) != 0) {
+		return true;
+	}
+
+	if (new_params->security != prev_params->security) {
+		return true;
+	}
+
+	if (new_params->channel != WIFI_CHANNEL_ANY &&
+	    new_params->channel != prev_params->channel) {
+		return true;
+	}
+
+	return false;
+}
+
+static int siwx91x_validate_ap_reconfig(const struct device *dev,
+				        struct wifi_connect_req_params *new_params)
+{
+	/*FIXME need to discuss the max inactivity time, need global var to store the previous val */
+	struct wifi_iface_status prev_params = { 0 };
+	uint32_t prev_psk_length = WIFI_PSK_MAX_LEN;
+	struct siwx91x_dev *sidev = dev->data;
+	uint8_t prev_psk[WIFI_PSK_MAX_LEN];
+	sl_net_credential_type_t psk_type;
+	int ret;
+
+	ret = siwx91x_status(dev, &prev_params);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (sidev->reboot_needed || siwx91x_is_param_changed(&prev_params, new_params)) {
+		return siwx91x_ap_disable(dev);
+	}
+
+	ret = sl_net_get_credential(SL_NET_DEFAULT_WIFI_AP_CREDENTIAL_ID, &psk_type, prev_psk,
+				    &prev_psk_length);
+	if (ret < 0) {
+		LOG_ERR("Failed to get credentials: 0x%x", ret);
+		return -EIO;
+	}
+
+	if (new_params->security != WIFI_SECURITY_TYPE_NONE) {
+		if (new_params->psk_length != prev_psk_length ||
+		    memcmp(new_params->psk, prev_psk, prev_psk_length) != 0) {
+			return siwx91x_ap_disable(dev);
+		}
+	}
+
+	LOG_ERR("Device already in active state");
+	return -EALREADY;
+}
+
+static int siwx91x_validate_sta_reconfig(const struct device *dev,
+					struct wifi_connect_req_params *new_params)
+{
+	struct wifi_iface_status prev_params = { 0 };
+	uint32_t prev_psk_length = WIFI_PSK_MAX_LEN;
+	uint8_t prev_psk[WIFI_PSK_MAX_LEN];
+	sl_net_credential_type_t psk_type;
+	int ret;
+
+	ret = siwx91x_status(dev, &prev_params);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (siwx91x_is_param_changed(&prev_params, new_params)) {
+		return siwx91x_disconnect(dev);
+	}
+
+	ret = sl_net_get_credential(SL_NET_DEFAULT_WIFI_CLIENT_CREDENTIAL_ID, &psk_type, prev_psk,
+				    &prev_psk_length);
+	if (ret < 0) {
+		LOG_ERR("Failed to get credentials: 0x%x", ret);
+		return -EIO;
+	}
+
+	if (new_params->security != WIFI_SECURITY_TYPE_NONE) {
+		if (new_params->psk_length != prev_psk_length ||
+		    memcmp(new_params->psk, prev_psk, prev_psk_length) != 0) {
+			return siwx91x_disconnect(dev);
+		}
+	}
+
+	LOG_ERR("Device already in active state");
+	return -EALREADY;
+}
+
 static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_params *params)
 {
 	sl_wifi_interface_t interface = sl_wifi_get_default_interface();
@@ -461,6 +560,15 @@ static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_p
 		LOG_ERR("Interface not in AP mode");
 		return siwx91x_notify_ap_event(sidev->iface, WIFI_STATUS_AP_OP_NOT_PERMITTED,
 					       -EINVAL);
+	}
+
+	/* Device hiddes both length and ssid at same time */
+	siwx91x_set_hidden_ssid(dev, params->ignore_broadcast_ssid);
+	if (sidev->state == WIFI_STATE_COMPLETED) {
+		ret = siwx91x_validate_ap_reconfig(dev, params);
+		if (ret < 0) {
+			return ret;
+		}
 	}
 
 	get_saved_ap_configuration(&saved_ap_cfg);
@@ -512,8 +620,6 @@ static int siwx91x_ap_enable(const struct device *dev, struct wifi_connect_req_p
 		return siwx91x_notify_ap_event(sidev->iface, WIFI_STATUS_AP_FAIL, -EINVAL);
 	}
 
-	/* Device hiddes both length and ssid at same time */
-	siwx91x_set_hidden_ssid(dev, params->ignore_broadcast_ssid);
 	ret = evaluate_nwp_reboot(dev, WIFI_AP_MODE);
 	if (ret < 0) {
 		return siwx91x_notify_ap_event(sidev->iface, WIFI_STATUS_AP_FAIL, ret);
@@ -613,6 +719,13 @@ static int siwx91x_connect(const struct device *dev, struct wifi_connect_req_par
 	enum wifi_mfp_options mfp_conf;
 	int ret = 0;
 
+	if (sidev->state == WIFI_STATE_COMPLETED) {
+		ret = siwx91x_validate_sta_reconfig(dev, params);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
 	switch (params->security) {
 	case WIFI_SECURITY_TYPE_NONE:
 		wifi_config.security = SL_WIFI_OPEN;
@@ -686,6 +799,7 @@ static int siwx91x_connect(const struct device *dev, struct wifi_connect_req_par
 	wifi_config.ssid.length = params->ssid_length,
 	memcpy(wifi_config.ssid.value, params->ssid, params->ssid_length);
 
+	/*FIXME Do we need to handle the case if ap is not available during reconnection? */
 	ret = sl_wifi_connect(interface, &wifi_config, 0);
 	if (ret != SL_STATUS_IN_PROGRESS) {
 		return siwx91x_notify_connect_event(sidev->iface, WIFI_STATUS_CONN_FAIL, -EIO);
@@ -976,21 +1090,20 @@ static int siwx91x_mode(const struct device *dev, struct wifi_mode_info *mode)
 static int siwx91x_ap_config_params(const struct device *dev, struct wifi_ap_config_params *params)
 {
 	sl_wifi_interface_t interface = sl_wifi_get_default_interface();
-	sl_wifi_ap_configuration_t siwx91x_ap_cfg = {
-		.channel.bandwidth   = SL_WIFI_BANDWIDTH_20MHz,
-	};
-	struct siwx91x_dev *sidev = dev->data;
+	sl_wifi_ap_configuration_t siwx91x_ap_cfg = { };
+	int ret;
 
 	__ASSERT(params, "params cannot be NULL");
-
 
 	if (FIELD_GET(SIWX91X_INTERFACE_MASK, interface) != SL_WIFI_AP_INTERFACE) {
 		LOG_ERR("Wi-Fi not in AP mode");
 		return -EINVAL;
 	}
 
-	if (sidev->state == WIFI_STATE_COMPLETED) {
-		return -EBUSY;
+	ret = sl_wifi_get_ap_configuration(SL_WIFI_AP_INTERFACE, &siwx91x_ap_cfg);
+	if (ret < 0) {
+		LOG_ERR("Failed to get ap configuration: 0x%x", ret);
+		return -EIO;
 	}
 
 	if (params->type & WIFI_AP_CONFIG_PARAM_MAX_INACTIVITY) {
@@ -1005,6 +1118,8 @@ static int siwx91x_ap_config_params(const struct device *dev, struct wifi_ap_con
 		if (params->bandwidth != WIFI_FREQ_BANDWIDTH_20MHZ) {
 			return -ENOTSUP;
 		}
+
+		siwx91x_ap_cfg.channel.bandwidth = SL_WIFI_BANDWIDTH_20MHz;
 	}
 
 	save_ap_configuration(&siwx91x_ap_cfg);
