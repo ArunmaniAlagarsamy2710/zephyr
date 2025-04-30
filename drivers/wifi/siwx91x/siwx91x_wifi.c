@@ -367,8 +367,9 @@ static int siwx91x_connect(const struct device *dev, struct wifi_connect_req_par
 			wifi_mfp_txt(mfp_conf), wifi_mfp_txt(params->mfp), wifi_mfp_txt(mfp_conf));
 	}
 
+
 	if (params->channel != WIFI_CHANNEL_ANY) {
-		wifi_config.channel.channel = params->channel;
+		wifi_config.channel_bitmap.channel_bitmap_2_4 = BIT(params->channel - 1);
 	}
 
 	wifi_config.ssid.length = params->ssid_length,
