@@ -704,6 +704,21 @@ struct wifi_iface_status {
 	int current_phy_tx_rate;
 };
 
+#define WIFI_ROAMING_THRESHOLD_MIN	-100
+#define WIFI_ROAMING_THRESHOLD_MAX	-10
+#define WIFI_ROAMING_TOL_MIN		0
+#define WIFI_ROAMING_TOL_MAX		90
+
+/** @brief Parameters used to configure legacy Wi-Fi roaming */
+struct wifi_legacy_roaming_params {
+	/** Roaming enable/disable flag */
+	enum wifi_roaming enabled;
+	/** RSSI threshold (in dBm) to trigger roaming */
+	int8_t trigger_threshold;
+	/** RSSI difference (in dB) */
+	uint8_t hysteresis;
+};
+
 /** @brief Wi-Fi power save parameters */
 struct wifi_ps_params {
 	/** Power save state */
@@ -1496,10 +1511,11 @@ struct wifi_mgmt_ops {
 	/** Send legacy scan
 	 *
 	 * @param dev Pointer to the device structure for the driver instance.
+	 * @param params Pointer to legacy roaming params (e.g., trigger threshold)
 	 *
 	 * @return 0 if ok, < 0 if error
 	 */
-	int (*legacy_roam)(const struct device *dev);
+	int (*legacy_roam)(const struct device *dev, struct wifi_legacy_roaming_params *params);
 
 	/** Get Version of WiFi driver and Firmware
 	 *

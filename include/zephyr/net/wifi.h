@@ -445,6 +445,14 @@ enum wifi_ps {
 	WIFI_PS_ENABLED,
 };
 
+/** @brief Wi-Fi roaming states. */
+enum wifi_roaming {
+	/** Roaming disabled. */
+	WIFI_ROAMING_DISABLED = 0,
+	/** Roaming enabled. */
+	WIFI_ROAMING_ENABLED,
+};
+
 /** Helper function to get user-friendly ps name. */
 const char *wifi_ps_txt(enum wifi_ps ps_name);
 

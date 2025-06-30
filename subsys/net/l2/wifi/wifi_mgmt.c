@@ -587,7 +587,6 @@ static int wifi_start_roaming(uint64_t mgmt_request, struct net_if *iface,
 	}
 }
 
-NET_MGMT_REGISTER_REQUEST_HANDLER(NET_REQUEST_WIFI_START_ROAMING, wifi_start_roaming);
 
 static int wifi_neighbor_rep_complete(uint64_t mgmt_request, struct net_if *iface,
 				      void *data, size_t len)
@@ -682,7 +681,49 @@ void wifi_mgmt_raise_neighbor_rep_recv_event(struct net_if *iface, char *inbuf, 
 		LOG_INF("Failed to Parse Neighbor Report - Skipping entry\n");
 	}
 }
-#endif
+#else
+static int wifi_start_roaming(uint64_t mgmt_request, struct net_if *iface,
+			      void *data, size_t len)
+{
+	struct wifi_legacy_roaming_params *roaming_params =
+				(struct wifi_legacy_roaming_params *)data;
+	const struct wifi_mgmt_ops *const wifi_mgmt_api = get_wifi_api(iface);
+	const struct device *dev = net_if_get_device(iface);
+	struct wifi_iface_status info = { 0 };
+
+	if (wifi_mgmt_api == NULL || wifi_mgmt_api->legacy_roam == NULL) {
+		return -ENOTSUP;
+	}
+
+	if (!net_if_is_admin_up(iface)) {
+		return -ENETDOWN;
+	}
+
+	if (roaming_params->trigger_threshold < WIFI_ROAMING_THRESHOLD_MIN ||
+	    roaming_params->trigger_threshold > WIFI_ROAMING_THRESHOLD_MAX) {
+		return -EINVAL;
+	}
+
+	if (roaming_params->hysteresis < WIFI_ROAMING_TOL_MIN ||
+	    roaming_params->hysteresis > WIFI_ROAMING_TOL_MAX) {
+		return -EINVAL;
+	}
+
+	if (net_mgmt(NET_REQUEST_WIFI_IFACE_STATUS, iface, &info,
+		     sizeof(struct wifi_iface_status))) {
+		return -EIO;
+	}
+
+	if (info.state < WIFI_STATE_ASSOCIATED) {
+		LOG_ERR("Device not connected");
+		return -EINVAL;
+	}
+
+	return wifi_mgmt_api->legacy_roam(dev, roaming_params);
+}
+#endif /* CONFIG_WIFI_NM_WPA_SUPPLICANT_ROAMING */
+
+NET_MGMT_REGISTER_REQUEST_HANDLER(NET_REQUEST_WIFI_START_ROAMING, wifi_start_roaming);
 
 static int wifi_ap_enable(uint64_t mgmt_request, struct net_if *iface,
 			  void *data, size_t len)

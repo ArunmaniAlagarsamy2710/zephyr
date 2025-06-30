@@ -1708,6 +1708,108 @@ static int cmd_wifi_11k_neighbor_request(const struct shell *sh, size_t argc, ch
 	return 0;
 }
 
+static int wifi_roaming_args_to_params(const struct shell *sh, size_t argc, char *argv[],
+                                       struct wifi_legacy_roaming_params *params)
+{
+	static const struct option long_options[] = {
+		{"threshold", required_argument, 0, 't'},
+		{"hysteresis", required_argument, 0, 's'},
+		{"iface", required_argument, 0, 'i'},
+		{"help", no_argument, 0, 'h'},
+		{0, 0, 0, 0}
+	};
+
+	struct getopt_state *state;
+	int opt, opt_index = 0;
+	long val;
+
+	while ((opt = getopt_long(argc, argv, "t:s:i:h", long_options, &opt_index)) != -1) {
+		state = getopt_state_get();
+
+		switch (opt) {
+			case 't':
+				if (!parse_number(sh, &val, state->optarg, "threshold",
+						  WIFI_ROAMING_THRESHOLD_MIN,
+						  WIFI_ROAMING_THRESHOLD_MAX)) {
+					return -EINVAL;
+				}
+				params->trigger_threshold = (int8_t)val;
+				break;
+
+			case 's':
+				if (!parse_number(sh, &val, state->optarg, "hysteresis",
+						  WIFI_ROAMING_TOL_MIN,
+						  WIFI_ROAMING_TOL_MAX)) {
+					return -EINVAL;
+				}
+				params->hysteresis = (uint8_t)val;
+				break;
+
+			case 'i':
+				/* Unused, but parsing to avoid unknown option error */
+				break;
+
+			case 'h':
+				shell_help(sh);
+				return SHELL_CMD_HELP_PRINTED;
+
+			default:
+				PR_ERROR("Invalid option: -%c\n", state->optopt);
+				shell_help(sh);
+				return SHELL_CMD_HELP_PRINTED;
+		}
+	}
+
+	if (params->trigger_threshold == 0 && params->hysteresis == 0) {
+		PR_ERROR("Missing required options: --threshold and --hysteresis\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int cmd_wifi_roaming(const struct shell *sh, size_t argc, char *argv[])
+{
+	struct net_if *iface = get_iface(IFACE_TYPE_STA, argc, argv);
+	struct wifi_legacy_roaming_params params = { 0 };
+	int ret;
+
+	context.sh = sh;
+
+	if (argc == 1) {
+		PR_WARNING("Invalid number of arguments\n");
+		return -ENOEXEC;
+	}
+
+	if (!strcasecmp(argv[1], "enable")) {
+		params.enabled = WIFI_ROAMING_ENABLED;
+
+		ret = wifi_roaming_args_to_params(sh, argc, argv, &params);
+		if (ret != 0) {
+			return ret;
+		}
+	} else if (!strcasecmp(argv[1], "disable")) {
+		params.enabled = WIFI_ROAMING_DISABLED;
+		params.trigger_threshold = 0;
+		params.hysteresis = 0;
+
+	} else {
+		PR_WARNING("Invalid roaming command. Use enable/disable\n");
+		return -EINVAL;
+	}
+
+	ret = net_mgmt(NET_REQUEST_WIFI_START_ROAMING, iface,
+		       &params, sizeof(params));
+	if (ret) {
+		PR_WARNING("Wi-Fi roaming command failed: %s\n", strerror(-ret));
+		return -ENOEXEC;
+	}
+
+	PR("Wi-Fi roaming %s", params.enabled ? "enabled" : "disabled");
+
+	return 0;
+}
+
 static int cmd_wifi_ps(const struct shell *sh, size_t argc, char *argv[])
 {
 	struct net_if *iface = get_iface(IFACE_TYPE_STA, argc, argv);
@@ -4286,6 +4388,13 @@ SHELL_SUBCMD_ADD((wifi), ps_exit_strategy, NULL,
 		 "[-i, --iface=<interface index>] : Interface index.\n",
 		 cmd_wifi_ps_exit_strategy,
 		 2, 2);
+
+SHELL_SUBCMD_ADD((wifi), roaming, NULL,
+                 "Configure or display Wi-Fi roaming.\n"
+                 "enable -t <threshold> -s <tolerance> [-i <iface>]\n"
+                 "disable [-i <iface>]\n"
+                 "[no argument] to print status\n",
+                 cmd_wifi_roaming, 1, 6);
 
 SHELL_CMD_REGISTER(wifi, &wifi_commands, "Wi-Fi commands", NULL);
 
