@@ -404,6 +404,7 @@ static const struct wifi_mgmt_ops siwx91x_mgmt = {
 	.get_stats		= siwx91x_stats,
 #endif
 	.get_version		= siwx91x_get_version,
+	.legacy_roam		= siwx91x_legacy_roaming,
 };
 
 static const struct net_wifi_mgmt_offload siwx91x_api = {

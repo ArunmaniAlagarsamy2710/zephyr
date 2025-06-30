@@ -139,6 +139,31 @@ siwx91x_configure_scan_dwell_time(sl_wifi_scan_type_t scan_type, uint16_t dwell_
 	}
 }
 
+int siwx91x_legacy_roaming(const struct device *dev, struct wifi_legacy_roaming_params *params)
+{
+	sl_wifi_interface_t interface = sl_wifi_get_default_interface();
+	sl_wifi_roam_configuration_t roam_configuration;
+	int ret;
+
+	if (params->enabled == WIFI_ROAMING_ENABLED) {
+		roam_configuration.trigger_level = params->trigger_threshold;
+		roam_configuration.trigger_level_change = params->hysteresis;
+	} else if (params->enabled == WIFI_ROAMING_DISABLED) {
+		roam_configuration.trigger_level = SL_WIFI_NEVER_ROAM;
+		roam_configuration.trigger_level_change = 0;
+	} else {
+		return -EINVAL;
+	}
+
+	ret = sl_wifi_set_roam_configuration(interface, &roam_configuration);
+	if (ret) {
+		LOG_ERR("Roaming configuration failed with status %x", ret);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 int siwx91x_scan(const struct device *dev, struct wifi_scan_params *z_scan_config,
 		 scan_result_cb_t cb)
 {
@@ -149,15 +174,6 @@ int siwx91x_scan(const struct device *dev, struct wifi_scan_params *z_scan_confi
 		.trigger_level_change = CONFIG_WIFI_SILABS_SIWX91X_ADV_RSSI_TOLERANCE_THRESHOLD,
 		.enable_multi_probe = CONFIG_WIFI_SILABS_SIWX91X_ADV_MULTIPROBE,
 		.enable_instant_scan = CONFIG_WIFI_SILABS_SIWX91X_ENABLE_INSTANT_SCAN,
-	};
-	sl_wifi_roam_configuration_t roam_configuration = {
-#ifdef CONFIG_WIFI_SILABS_SIWX91X_ENABLE_ROAMING
-		.trigger_level = CONFIG_WIFI_SILABS_SIWX91X_ROAMING_TRIGGER_LEVEL,
-		.trigger_level_change = CONFIG_WIFI_SILABS_SIWX91X_ROAMING_TRIGGER_LEVEL_CHANGE,
-#else
-		.trigger_level = SL_WIFI_NEVER_ROAM,
-		.trigger_level_change = 0,
-#endif
 	};
 	struct siwx91x_dev *sidev = dev->data;
 	sl_wifi_ssid_t ssid = { };
@@ -190,12 +206,6 @@ int siwx91x_scan(const struct device *dev, struct wifi_scan_params *z_scan_confi
 		ret = sl_wifi_set_advanced_scan_configuration(&advanced_scan_config);
 		if (ret) {
 			LOG_ERR("Advanced scan configuration failed with status %x", ret);
-			return -EINVAL;
-		}
-
-		ret = sl_wifi_set_roam_configuration(interface, &roam_configuration);
-		if (ret) {
-			LOG_ERR("Roaming configuration failed with status %x", ret);
 			return -EINVAL;
 		}
 

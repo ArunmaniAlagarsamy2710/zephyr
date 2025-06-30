@@ -16,4 +16,5 @@ int siwx91x_scan(const struct device *dev,
 unsigned int siwx91x_on_scan(sl_wifi_event_t event, sl_wifi_scan_result_t *result,
 			     uint32_t result_size, void *arg);
 
+int siwx91x_legacy_roaming(const struct device *dev, struct wifi_legacy_roaming_params *params);
 #endif
