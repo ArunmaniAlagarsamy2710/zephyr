@@ -127,6 +127,8 @@ enum net_request_wifi_cmd {
 #endif
 	/** Start roaming */
 	NET_REQUEST_WIFI_CMD_START_ROAMING,
+	/** get roaming config */
+	NET_REQUEST_WIFI_CMD_ROAMING_CONFIG,
 	/** Neighbor report complete */
 	NET_REQUEST_WIFI_CMD_NEIGHBOR_REP_COMPLETE,
 	/** Specific scan */
@@ -311,6 +313,11 @@ NET_MGMT_DEFINE_REQUEST_HANDLER(NET_REQUEST_WIFI_CONNECT_STORED);
 	(NET_WIFI_BASE | NET_REQUEST_WIFI_CMD_START_ROAMING)
 
 NET_MGMT_DEFINE_REQUEST_HANDLER(NET_REQUEST_WIFI_START_ROAMING);
+
+#define NET_REQUEST_WIFI_GET_ROAMING				\
+	(NET_WIFI_BASE | NET_REQUEST_WIFI_CMD_ROAMING_CONFIG)
+
+NET_MGMT_DEFINE_REQUEST_HANDLER(NET_REQUEST_WIFI_GET_ROAMING);
 
 #define NET_REQUEST_WIFI_NEIGHBOR_REP_COMPLETE			\
 	(NET_WIFI_BASE | NET_REQUEST_WIFI_CMD_NEIGHBOR_REP_COMPLETE)
@@ -1516,6 +1523,13 @@ struct wifi_mgmt_ops {
 	 * @return 0 if ok, < 0 if error
 	 */
 	int (*legacy_roam)(const struct device *dev, struct wifi_legacy_roaming_params *params);
+	/** Get current legacy roaming settings.
+	 *
+	 * @param dev Pointer to the device structure for the driver instance.
+	 * @param params Pointer to structure where configuration will be stored.
+	 * @return 0 on success, negative on failure.
+	 */
+	int (*get_legacy_roam)(const struct device *dev, struct wifi_legacy_roaming_params *params);
 
 	/** Get Version of WiFi driver and Firmware
 	 *

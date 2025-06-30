@@ -726,6 +726,30 @@ static int wifi_start_roaming(uint64_t mgmt_request, struct net_if *iface,
 
 NET_MGMT_REGISTER_REQUEST_HANDLER(NET_REQUEST_WIFI_START_ROAMING, wifi_start_roaming);
 
+static int wifi_get_roaming_config(uint64_t mgmt_request, struct net_if *iface,
+				   void *data, size_t len)
+{
+	const struct wifi_mgmt_ops *const wifi_mgmt_api = get_wifi_api(iface);
+	struct wifi_legacy_roaming_params *roaming_config = data;
+	const struct device *dev = net_if_get_device(iface);
+
+	if (wifi_mgmt_api == NULL || wifi_mgmt_api->get_legacy_roam == NULL) {
+		return -ENOTSUP;
+	}
+
+	if (!net_if_is_admin_up(iface)) {
+		return -ENETDOWN;
+	}
+
+	if (!data || len != sizeof(*roaming_config)) {
+		return -EINVAL;
+	}
+
+	return wifi_mgmt_api->get_legacy_roam(dev, roaming_config);
+}
+
+NET_MGMT_REGISTER_REQUEST_HANDLER(NET_REQUEST_WIFI_GET_ROAMING, wifi_get_roaming_config);
+
 static int wifi_ap_enable(uint64_t mgmt_request, struct net_if *iface,
 			  void *data, size_t len)
 {

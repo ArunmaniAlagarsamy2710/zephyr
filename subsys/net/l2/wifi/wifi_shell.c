@@ -1777,8 +1777,20 @@ static int cmd_wifi_roaming(const struct shell *sh, size_t argc, char *argv[])
 	context.sh = sh;
 
 	if (argc == 1) {
-		PR_WARNING("Invalid number of arguments\n");
-		return -ENOEXEC;
+		ret = net_mgmt(NET_REQUEST_WIFI_GET_ROAMING, iface,
+			       &params, sizeof(params));
+		if (ret) {
+			PR_WARNING("Failed to get roaming status: %s\n", strerror(-ret));
+			return -ENOEXEC;
+		}
+
+		PR("Roaming: %s", params.enabled ? "ENABLED" : "DISABLED");
+		if (params.enabled) {
+			PR("Threshold: %d dBm", params.trigger_threshold);
+			PR("Threshold Tolerance: %d dB", params.hysteresis);
+		}
+
+		return 0;
 	}
 
 	if (!strcasecmp(argv[1], "enable")) {
@@ -1794,7 +1806,7 @@ static int cmd_wifi_roaming(const struct shell *sh, size_t argc, char *argv[])
 		params.hysteresis = 0;
 
 	} else {
-		PR_WARNING("Invalid roaming command. Use enable/disable\n");
+		PR_WARNING("Invalid roaming command. Use enable/disable or no args\n");
 		return -EINVAL;
 	}
 
