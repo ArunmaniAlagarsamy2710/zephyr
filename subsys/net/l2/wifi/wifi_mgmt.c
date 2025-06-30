@@ -581,7 +581,8 @@ static int wifi_start_roaming(uint64_t mgmt_request, struct net_if *iface,
 			return -ENOTSUP;
 		}
 	} else if (wifi_mgmt_api->legacy_roam) {
-		return wifi_mgmt_api->legacy_roam(dev);
+		/* TODO: Replace NULL with roaming threshold parameters */
+		return wifi_mgmt_api->legacy_roam(dev, NULL);
 	} else {
 		return -ENOTSUP;
 	}

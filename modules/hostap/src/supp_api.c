@@ -1755,9 +1755,12 @@ int supplicant_bss_ext_capab(const struct device *dev, int capab)
 	return is_support;
 }
 
-int supplicant_legacy_roam(const struct device *dev)
+int supplicant_legacy_roam(const struct device *dev, struct wifi_legacy_roaming_params *params)
 {
 	int ret = -1;
+
+	/* TODO: Parse the roaming threshold values from params */
+	ARG_UNUSED(params);
 
 	k_mutex_lock(&wpa_supplicant_mutex, K_FOREVER);
 	if (!wpa_cli_cmd_v("scan")) {

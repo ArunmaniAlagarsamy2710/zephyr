@@ -272,10 +272,11 @@ int supplicant_btm_query(const struct device *dev, uint8_t reason);
 /** Send legacy roam
  *
  * @param dev Pointer to the device structure for the driver instance.
+ * @param params Pointer to legacy roaming params (e.g., trigger threshold).
  *
  * @return 0 if ok, < 0 if error
  */
-int supplicant_legacy_roam(const struct device *dev);
+int supplicant_legacy_roam(const struct device *dev, struct wifi_legacy_roaming_params *params);
 
 /** Judge ap whether support the capability
  *
