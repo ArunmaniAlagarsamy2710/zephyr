@@ -1,0 +1,13 @@
+&watchdog {
+	status = "okay";
+};
+
+/ {
+	toggle {
+		compatible = "gpio-keys";
+
+		toggle0: toggle_0 {
+			gpios = <&ulpgpio 1 GPIO_ACTIVE_LOW>;
+		};
+	};
+};
