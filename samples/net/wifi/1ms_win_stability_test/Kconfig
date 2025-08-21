@@ -2,18 +2,19 @@ mainmenu "1ms_stability_test"
 
 source "Kconfig.zephyr"
 
-config TEST_STA 
+config STA_TEST 
         bool "Test STA functionalities"
         default n
 
-config TEST_MULTIPLE_SCAN 
+config SCAN_TEST
         bool "Test multiple scan functionalities"
         default n
 
-config TEST_AP
+config AP_TEST
 	bool "AP mode test"
 	default n
 
-config DATA_TRANSFER_TEST
+config AP_DATA_TRANSFER_TEST
 	bool "Data transfer test in AP mode"
+	depends on AP_TEST
 	default n

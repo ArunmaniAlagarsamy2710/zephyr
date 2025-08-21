@@ -6,3 +6,9 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(1ms_win_stability_test)
 
 target_sources(app PRIVATE src/main.c)
+
+zephyr_library_sources_ifdef(CONFIG_STA_TEST src/test_sta.c)
+zephyr_library_sources_ifdef(CONFIG_AP_TEST src/test_ap.c)
+zephyr_library_sources_ifdef(CONFIG_SCAN_TEST src/test_scan.c)
+
+
