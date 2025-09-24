@@ -223,15 +223,17 @@ int siwx91x_scan(const struct device *dev, struct wifi_scan_params *z_scan_confi
 	}
 
 	for (int i = 0; i < ARRAY_SIZE(z_scan_config->band_chan); i++) {
+		if (z_scan_config->band_chan[i].band != WIFI_FREQ_BAND_2_4_GHZ) {
+			return -EINVAL;
+		}
+
 		/* End of channel list */
 		if (z_scan_config->band_chan[i].channel == 0) {
 			break;
 		}
 
-		if (z_scan_config->band_chan[i].band == WIFI_FREQ_BAND_2_4_GHZ) {
-			sl_scan_config.channel_bitmap_2g4 |=
-				BIT(z_scan_config->band_chan[i].channel - 1);
-		}
+		sl_scan_config.channel_bitmap_2g4 |=
+			BIT(z_scan_config->band_chan[i].channel - 1);
 	}
 
 	if (z_scan_config->band_chan[0].channel && !sl_scan_config.channel_bitmap_2g4) {
