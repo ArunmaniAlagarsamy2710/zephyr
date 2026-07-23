@@ -528,6 +528,17 @@ config SYSTEM_WORKQUEUE_WORK_TIMEOUT_MS
 	  Set to 0 to disable work timeout for system workqueue. Option
 	  has no effect if WORKQUEUE_WORK_TIMEOUT is not enabled.
 
+config SYSTEM_WORKQUEUE_PRIORITY_ORDERING
+	bool "Enable priority ordering for work queue items"
+	help
+	  When enabled, work queue items can be assigned a priority value.
+	  Higher priority work items (lower numerical values) will be executed
+	  before lower priority items in the queue. Work items with equal
+	  priority maintain FIFO ordering. This adds a uint8_t priority field
+	  to struct k_work and uses sorted insertion instead of simple
+	  appending. Disable this option to save memory if priority ordering
+	  is not needed.
+
 endmenu
 
 menu "Barrier Operations"
